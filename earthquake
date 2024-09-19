@@ -1,0 +1,59 @@
+import spidev
+import RPi.GPIO as GPIO
+import numpy as np
+from scipy.signal import find_peaks
+import time
+
+# Constants
+THRESHOLD = 4.5
+P_WAVE_WINDOW = 0.5  # Time window for detecting P-waves
+ALARM_PIN = 18  # GPIO pin for the alarm
+
+# Initialize GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(ALARM_PIN, GPIO.OUT)
+
+# Setup SPI for ADC
+spi = spidev.SpiDev()
+spi.open(0, 0)
+
+def read_adc(channel):
+    adc = spi.xfer2([1, (8 + channel) << 4, 0])
+    return ((adc[1] & 3) << 8) + adc[2]
+
+def detect_seismic_activity():
+    data_buffer = []
+    start_time = time.time()
+
+    while True:
+        value = read_adc(0) / 1023.0  # Normalize value
+        data_buffer.append(value)
+        
+        if time.time() - start_time > P_WAVE_WINDOW:
+            start_time = time.time()
+            process_data(data_buffer)
+            data_buffer = []  # Clear buffer after processing
+
+def process_data(data):
+    if len(data) < 10:
+        return
+
+    # Find peaks in the data
+    peaks, _ = find_peaks(data, height=THRESHOLD)
+    
+    if len(peaks) > 0:
+        # Alarm for detected earthquake
+        trigger_alarm()
+
+def trigger_alarm():
+    GPIO.output(ALARM_PIN, GPIO.HIGH)
+    print("Earthquake detected! Alarm triggered.")
+    time.sleep(5)  # Alarm duration
+    GPIO.output(ALARM_PIN, GPIO.LOW)
+
+try:
+    detect_seismic_activity()
+except KeyboardInterrupt:
+    print("Program stopped.")
+finally:
+    GPIO.cleanup()
